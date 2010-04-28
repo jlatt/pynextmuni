@@ -1,26 +1,10 @@
 __author__ = 'Jeremy Latt <jeremy.latt@gmail.com>'
 
-import time
+import datetime
 import urllib
 import urlparse
 
 from lxml import etree
-
-base_url = 'http://webservices.nextbus.com/service/publicXMLFeed'
-agency_param = 'sf-muni' # a
-
-def feed_url(*pairs, **params):
-    pairs = list(pairs)
-    params['a'] = agency_param
-    pairs.extend(params.items())
-    url = base_url + '?' + urllib.urlencode(pairs, doseq=True)
-    return url
-
-def feed_doc(*args, **kw):
-    url = feed_url(*args, **kw)
-    resource = urllib.urlopen(url)
-    doc = etree.parse(resource)
-    return doc
 
 class RouteSummary(object):
     def __init__(self, el):
@@ -94,7 +78,7 @@ class Prediction(object):
     def __init__(self, el):
         self.seconds = int(el.get('seconds'))
         self.minutes = int(el.get('minutes'))
-        self.epoch_time = int(el.get('epochTime'))
+        self.epoch_time = epoch_time_to_datetime(el.get('epochTime'))
         self.is_departure = el.get('isDeparture') == 'true'
         self.dir_tag = el.get('dirTag')
         self.block = el.get('block')
@@ -123,6 +107,28 @@ class Vehicle(Point):
         super(Vehicle, self).__init__(el)
 
     __repr__ = lambda self: 'Vehicle(id=%(id)s, route=%(route_tag)s, dir=%(dir_tag)s, lat=%(lat)f, lon=%(lon)f)' % self.__dict__
+    
+    __str__ = __repr__
+
+base_url = 'http://webservices.nextbus.com/service/publicXMLFeed'
+agency_param = 'sf-muni' # a
+epoch = datetime.datetime.utcfromtimestamp(0)
+
+def feed_url(*pairs, **params):
+    pairs = list(pairs)
+    params['a'] = agency_param
+    pairs.extend(params.items())
+    url = base_url + '?' + urllib.urlencode(pairs, doseq=True)
+    return url
+
+def feed_doc(*args, **kw):
+    url = feed_url(*args, **kw)
+    resource = urllib.urlopen(url)
+    doc = etree.parse(resource)
+    return doc
+
+def epoch_time_to_datetime(epoch_time):
+    return datetime.datetime.utcfromtimestamp(int(epoch_time) / 1000.0)
 
 def route_list():
     doc = feed_doc(command='routeList')
@@ -150,12 +156,21 @@ def predictions_for_stops(route_stop_pairs):
     predictionses = map(Predictions, doc.xpath('/body/predictions'))
     return predictionses
 
-def vehicle_locations(route, t=0):
+def vehicle_locations(route, last_time=None):
+    t = 0
+    if last_time:
+        delta = last_time - epoch
+        t += delta.days * 24 * 60 * 60 * 1000
+        t += delta.seconds * 1000
+        t += delta.microseconds / 1000
+
     doc = feed_doc(command='vehicleLocations', r=route, t=t)
-    last_time = int(doc.xpath('lastTime')[0].get('time'))
+    last_time = epoch_time_to_datetime(doc.xpath('lastTime')[0].get('time'))
     vehicles = map(Vehicle, doc.xpath('/body/vehicle'))
     return vehicles, last_time
 
 if __name__ == '__main__':
     import pprint
-    pprint.pprint(vehicle_locations('38'))
+    vehicles, last_time = vehicle_locations('38')
+    pprint.pprint(vehicles)
+    pprint.pprint(last_time)
